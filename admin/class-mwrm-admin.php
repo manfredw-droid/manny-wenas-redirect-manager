@@ -154,8 +154,16 @@ class MWRM_Admin
     private static function render_messages()
     {
         // phpcs:disable WordPress.Security.NonceVerification
-        if (isset($_GET['mwrm_error'])) {
-            printf('<div class="notice notice-error"><p>%s</p></div>', esc_html(sanitize_text_field(wp_unslash($_GET['mwrm_error']))));
+        $errors = array(
+            'mwrm_invalid' => __('Source and target are required.', 'manny-wenas-redirect-manager'),
+            'mwrm_loop' => __('Source and target are the same.', 'manny-wenas-redirect-manager'),
+            'mwrm_root' => __('A wildcard on the site root is not allowed.', 'manny-wenas-redirect-manager'),
+            'mwrm_duplicate' => __('A redirect for this source already exists.', 'manny-wenas-redirect-manager'),
+        );
+        $error = isset($_GET['mwrm_error']) ? sanitize_key($_GET['mwrm_error']) : '';
+
+        if (isset($errors[$error])) {
+            printf('<div class="notice notice-error"><p>%s</p></div>', esc_html($errors[$error]));
         } elseif (isset($_GET['mwrm_msg'])) {
             printf('<div class="notice notice-success is-dismissible"><p>%s</p></div>', esc_html__('Saved.', 'manny-wenas-redirect-manager'));
         }
@@ -195,7 +203,7 @@ class MWRM_Admin
 
         $args = array('page' => 'mwrm-redirects');
         if (is_wp_error($result)) {
-            $args['mwrm_error'] = rawurlencode($result->get_error_message());
+            $args['mwrm_error'] = $result->get_error_code();
         } else {
             $args['mwrm_msg'] = 'saved';
             $row = MWRM_Repository::get($result);

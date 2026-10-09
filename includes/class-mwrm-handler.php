@@ -31,7 +31,7 @@ class MWRM_Handler
         $request = wp_unslash($_SERVER['REQUEST_URI']); // phpcs:ignore WordPress.Security.ValidatedSanitizedInput
         $path = MWRM_Repository::relative_path($request);
 
-        $rule = MWRM_Repository::match($path);
+        $rule = MWRM_Repository::match($path, MWRM_Repository::relative_path($request, false));
 
         if (!$rule) {
             return;
