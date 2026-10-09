@@ -159,6 +159,16 @@ class MWRM_Admin
         } elseif (isset($_GET['mwrm_msg'])) {
             printf('<div class="notice notice-success is-dismissible"><p>%s</p></div>', esc_html__('Saved.', 'manny-wenas-redirect-manager'));
         }
+
+        $warnings = array(
+            'loop' => __('Warning: this redirect creates a loop. Visitors will never reach a page.', 'manny-wenas-redirect-manager'),
+            'chain' => __('Warning: the target is itself redirected, creating a redirect chain. Point this redirect directly at the final URL.', 'manny-wenas-redirect-manager'),
+            'inbound' => __('Warning: another redirect points to this source, creating a redirect chain. Update that redirect to the new target.', 'manny-wenas-redirect-manager'),
+        );
+        $warn = isset($_GET['mwrm_warn']) ? sanitize_key($_GET['mwrm_warn']) : '';
+        if (isset($warnings[$warn])) {
+            printf('<div class="notice notice-warning"><p>%s</p></div>', esc_html($warnings[$warn]));
+        }
         // phpcs:enable
     }
 
@@ -188,6 +198,17 @@ class MWRM_Admin
             $args['mwrm_error'] = rawurlencode($result->get_error_message());
         } else {
             $args['mwrm_msg'] = 'saved';
+            $row = MWRM_Repository::get($result);
+            $trace = MWRM_Repository::trace($row->source, $row->target);
+
+            if ($trace['loop']) {
+                $args['mwrm_warn'] = 'loop';
+            } elseif ($trace['hops'] > 0) {
+                $args['mwrm_warn'] = 'chain';
+            } elseif (MWRM_Repository::inbound($row->source)) {
+                $args['mwrm_warn'] = 'inbound';
+            }
+
             MWRM_Log::delete_by_url(MWRM_Repository::relative_path(sanitize_text_field(wp_unslash($_POST['source']))));
         }
 

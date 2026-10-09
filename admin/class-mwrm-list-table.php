@@ -36,6 +36,7 @@ class MWRM_List_Table extends WP_List_Table
             'target' => __('Target', 'manny-wenas-redirect-manager'),
             'type' => __('Type', 'manny-wenas-redirect-manager'),
             'hits' => __('Hits', 'manny-wenas-redirect-manager'),
+            'status' => __('Status', 'manny-wenas-redirect-manager'),
         );
     }
 
@@ -96,6 +97,29 @@ class MWRM_List_Table extends WP_List_Table
         );
 
         return '<strong>' . esc_html($item->source) . '</strong>' . $this->row_actions($actions);
+    }
+
+    /**
+     * @param object $item Row.
+     * @return string
+     */
+    protected function column_status($item)
+    {
+        $trace = MWRM_Repository::trace($item->source, $item->target);
+
+        if ($trace['loop']) {
+            return '<span style="color:#b32d2e">' . esc_html__('Redirect loop', 'manny-wenas-redirect-manager') . '</span>';
+        }
+
+        if ($trace['hops'] > 0) {
+            return '<span style="color:#996800">' . esc_html(sprintf(
+                /* translators: %d: number of extra redirects. */
+                _n('Chain (%d extra hop)', 'Chain (%d extra hops)', $trace['hops'], 'manny-wenas-redirect-manager'),
+                $trace['hops']
+            )) . '</span>';
+        }
+
+        return '&mdash;';
     }
 
     /**

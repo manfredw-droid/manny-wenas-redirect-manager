@@ -180,6 +180,81 @@ class MWRM_Repository
     }
 
     /**
+     * Is the URL on this site (relative, or same host)?
+     *
+     * @param string $url URL or path.
+     * @return bool
+     */
+    public static function is_internal($url)
+    {
+        $host = wp_parse_url($url, PHP_URL_HOST);
+
+        return !$host || strtolower($host) === strtolower((string) wp_parse_url(home_url(), PHP_URL_HOST));
+    }
+
+    /**
+     * Follow a redirect target through other redirects.
+     *
+     * @param string $source Source of the redirect being checked.
+     * @param string $target Its target.
+     * @return array {hops:int, loop:bool, final:string} hops = further redirects after the first.
+     */
+    public static function trace($source, $target)
+    {
+        $seen = array(self::relative_path($source));
+        $current = $target;
+        $hops = 0;
+        $loop = false;
+
+        while ($hops < 10 && self::is_internal($current)) {
+            $path = self::relative_path($current);
+
+            if (in_array($path, $seen, true)) {
+                $loop = true;
+                break;
+            }
+
+            $rule = self::match($path);
+
+            if (!$rule) {
+                break;
+            }
+
+            $seen[] = $path;
+            $current = $rule->resolved_target;
+            $hops++;
+        }
+
+        return array('hops' => $hops, 'loop' => $loop, 'final' => $current);
+    }
+
+    /**
+     * Existing redirects that point at the given source (would form a chain).
+     *
+     * @param string $source Source path.
+     * @return array Rows.
+     */
+    public static function inbound($source)
+    {
+        global $wpdb;
+
+        $source = self::relative_path($source);
+
+        if ('/*' === substr($source, -2)) {
+            return array();
+        }
+
+        $rows = $wpdb->get_results($wpdb->prepare(
+            'SELECT id, source, target FROM ' . self::table() . ' WHERE target LIKE %s',
+            '%' . $wpdb->esc_like(basename($source)) . '%'
+        ));
+
+        return array_values(array_filter($rows, function ($row) use ($source) {
+            return self::is_internal($row->target) && self::relative_path($row->target) === $source;
+        }));
+    }
+
+    /**
      * @param int $id Redirect ID.
      * @return void
      */
