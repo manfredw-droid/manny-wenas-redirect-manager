@@ -29,13 +29,7 @@ class MWRM_Handler
         }
 
         $request = wp_unslash($_SERVER['REQUEST_URI']); // phpcs:ignore WordPress.Security.ValidatedSanitizedInput
-        $path = MWRM_Repository::normalize_path($request);
-
-        // Strip a subdirectory install path.
-        $home = MWRM_Repository::normalize_path(home_url());
-        if ('/' !== $home && 0 === strpos($path, $home)) {
-            $path = '/' . ltrim(substr($path, strlen($home)), '/');
-        }
+        $path = MWRM_Repository::relative_path($request);
 
         $rule = MWRM_Repository::match($path);
 

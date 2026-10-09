@@ -41,6 +41,24 @@ class MWRM_Repository
     }
 
     /**
+     * Normalized path relative to the site root (subdirectory installs stripped).
+     *
+     * @param string $url URL or path.
+     * @return string
+     */
+    public static function relative_path($url)
+    {
+        $path = self::normalize_path($url);
+        $home = self::normalize_path(home_url());
+
+        if ('/' !== $home && 0 === strpos($path, $home)) {
+            $path = '/' . ltrim(substr($path, strlen($home)), '/');
+        }
+
+        return $path;
+    }
+
+    /**
      * @param int $id Redirect ID.
      * @return object|null
      */
@@ -64,7 +82,7 @@ class MWRM_Repository
     {
         global $wpdb;
 
-        $source = self::normalize_path($data['source']);
+        $source = self::relative_path($data['source']);
         $target = esc_url_raw(trim($data['target']));
         $type = (int) $data['type'];
 

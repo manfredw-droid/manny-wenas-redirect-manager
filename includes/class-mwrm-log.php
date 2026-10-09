@@ -43,7 +43,7 @@ class MWRM_Log
             return;
         }
 
-        $path = MWRM_Repository::normalize_path(wp_unslash($_SERVER['REQUEST_URI'])); // phpcs:ignore WordPress.Security.ValidatedSanitizedInput
+        $path = MWRM_Repository::relative_path(wp_unslash($_SERVER['REQUEST_URI'])); // phpcs:ignore WordPress.Security.ValidatedSanitizedInput
 
         // Skip static assets such as images and favicons.
         if (preg_match('/\.(?:jpe?g|png|gif|webp|svg|ico|css|js|map|woff2?|ttf)$/', $path)) {

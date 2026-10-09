@@ -187,7 +187,7 @@ class MWRM_Admin
             $args['mwrm_error'] = rawurlencode($result->get_error_message());
         } else {
             $args['mwrm_msg'] = 'saved';
-            MWRM_Log::delete_by_url(MWRM_Repository::normalize_path(sanitize_text_field(wp_unslash($_POST['source']))));
+            MWRM_Log::delete_by_url(MWRM_Repository::relative_path(sanitize_text_field(wp_unslash($_POST['source']))));
         }
 
         wp_safe_redirect(add_query_arg($args, admin_url('admin.php')));
