@@ -1,0 +1,441 @@
+<?php
+/**
+ * Admin menu and screens.
+ *
+ * @package MannyWenasRedirectManager
+ */
+
+if (!defined('ABSPATH')) {
+    exit;
+}
+
+class MWRM_Admin
+{
+    const CAPABILITY = 'manage_options';
+
+    /**
+     * @return void
+     */
+    public static function init()
+    {
+        add_action('admin_menu', array(__CLASS__, 'register_menu'));
+        add_action('admin_post_mwrm_save', array(__CLASS__, 'handle_save'));
+        add_action('admin_post_mwrm_delete', array(__CLASS__, 'handle_delete'));
+        add_action('admin_post_mwrm_404_delete', array(__CLASS__, 'handle_404_delete'));
+        add_action('admin_post_mwrm_404_clear', array(__CLASS__, 'handle_404_clear'));
+        add_action('admin_post_mwrm_import', array(__CLASS__, 'handle_import'));
+    }
+
+    /**
+     * @return void
+     */
+    public static function register_menu()
+    {
+        add_menu_page(
+            __('Redirects', 'manny-wenas-redirect-manager'),
+            __('Redirects', 'manny-wenas-redirect-manager'),
+            self::CAPABILITY,
+            'mwrm-redirects',
+            array(__CLASS__, 'render_redirects'),
+            'dashicons-randomize',
+            80
+        );
+
+        add_submenu_page(
+            'mwrm-redirects',
+            __('404 Monitor', 'manny-wenas-redirect-manager'),
+            __('404 Monitor', 'manny-wenas-redirect-manager'),
+            self::CAPABILITY,
+            'mwrm-404',
+            array(__CLASS__, 'render_404')
+        );
+
+        add_submenu_page(
+            'mwrm-redirects',
+            __('Import', 'manny-wenas-redirect-manager'),
+            __('Import', 'manny-wenas-redirect-manager'),
+            self::CAPABILITY,
+            'mwrm-import',
+            array(__CLASS__, 'render_import')
+        );
+    }
+
+    /**
+     * Overview list, or the add/edit form.
+     *
+     * @return void
+     */
+    public static function render_redirects()
+    {
+        if (!current_user_can(self::CAPABILITY)) {
+            return;
+        }
+
+        // phpcs:disable WordPress.Security.NonceVerification
+        $action = isset($_GET['action']) ? sanitize_key($_GET['action']) : '';
+        $id = isset($_GET['id']) ? absint($_GET['id']) : 0;
+        // phpcs:enable
+
+        if ('add' === $action || 'edit' === $action) {
+            $prefill = isset($_GET['source']) ? sanitize_text_field(wp_unslash($_GET['source'])) : ''; // phpcs:ignore WordPress.Security.NonceVerification
+            self::render_form($id ? MWRM_Repository::get($id) : null, $prefill);
+
+            return;
+        }
+
+        $table = new MWRM_List_Table();
+        $table->prepare_items();
+
+        $add = add_query_arg(array('page' => 'mwrm-redirects', 'action' => 'add'), admin_url('admin.php'));
+
+        echo '<div class="wrap"><h1 class="wp-heading-inline">' . esc_html__('Redirects', 'manny-wenas-redirect-manager') . '</h1>';
+        printf(
+            ' <a href="%s" class="page-title-action">%s</a><hr class="wp-header-end">',
+            esc_url($add),
+            esc_html__('Add new', 'manny-wenas-redirect-manager')
+        );
+
+        self::render_messages();
+        $table->display();
+        echo '</div>';
+    }
+
+    /**
+     * @param object|null $row     Existing redirect.
+     * @param string      $prefill Source to prefill for a new redirect.
+     * @return void
+     */
+    private static function render_form($row, $prefill = '')
+    {
+        $source = $row ? $row->source : $prefill;
+        $target = $row ? $row->target : '';
+        $type = $row ? (int) $row->type : 301;
+        ?>
+        <div class="wrap">
+            <h1><?php echo $row ? esc_html__('Edit redirect', 'manny-wenas-redirect-manager') : esc_html__('Add redirect', 'manny-wenas-redirect-manager'); ?></h1>
+            <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>">
+                <input type="hidden" name="action" value="mwrm_save">
+                <input type="hidden" name="id" value="<?php echo esc_attr($row ? $row->id : 0); ?>">
+                <?php wp_nonce_field('mwrm_save'); ?>
+                <table class="form-table" role="presentation">
+                    <tr>
+                        <th><label for="mwrm-source"><?php esc_html_e('Source', 'manny-wenas-redirect-manager'); ?></label></th>
+                        <td>
+                            <input type="text" id="mwrm-source" name="source" class="regular-text" value="<?php echo esc_attr($source); ?>" required>
+                            <p class="description"><?php esc_html_e('Path, e.g. /old-page. Use /old/* for a wildcard.', 'manny-wenas-redirect-manager'); ?></p>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th><label for="mwrm-target"><?php esc_html_e('Target', 'manny-wenas-redirect-manager'); ?></label></th>
+                        <td>
+                            <input type="text" id="mwrm-target" name="target" class="regular-text" value="<?php echo esc_attr($target); ?>" required>
+                            <p class="description"><?php esc_html_e('Path or full URL. Use /new/* to reuse the wildcard part.', 'manny-wenas-redirect-manager'); ?></p>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th><label for="mwrm-type"><?php esc_html_e('Type', 'manny-wenas-redirect-manager'); ?></label></th>
+                        <td>
+                            <select id="mwrm-type" name="type">
+                                <option value="301" <?php selected($type, 301); ?>>301 <?php esc_html_e('Permanent', 'manny-wenas-redirect-manager'); ?></option>
+                                <option value="302" <?php selected($type, 302); ?>>302 <?php esc_html_e('Temporary', 'manny-wenas-redirect-manager'); ?></option>
+                            </select>
+                        </td>
+                    </tr>
+                </table>
+                <?php submit_button(); ?>
+            </form>
+        </div>
+        <?php
+    }
+
+    /**
+     * @return void
+     */
+    private static function render_messages()
+    {
+        // phpcs:disable WordPress.Security.NonceVerification
+        if (isset($_GET['mwrm_error'])) {
+            printf('<div class="notice notice-error"><p>%s</p></div>', esc_html(sanitize_text_field(wp_unslash($_GET['mwrm_error']))));
+        } elseif (isset($_GET['mwrm_msg'])) {
+            printf('<div class="notice notice-success is-dismissible"><p>%s</p></div>', esc_html__('Saved.', 'manny-wenas-redirect-manager'));
+        }
+
+        $warnings = array(
+            'loop' => __('Warning: this redirect creates a loop. Visitors will never reach a page.', 'manny-wenas-redirect-manager'),
+            'chain' => __('Warning: the target is itself redirected, creating a redirect chain. Point this redirect directly at the final URL.', 'manny-wenas-redirect-manager'),
+            'inbound' => __('Warning: another redirect points to this source, creating a redirect chain. Update that redirect to the new target.', 'manny-wenas-redirect-manager'),
+        );
+        $warn = isset($_GET['mwrm_warn']) ? sanitize_key($_GET['mwrm_warn']) : '';
+        if (isset($warnings[$warn])) {
+            printf('<div class="notice notice-warning"><p>%s</p></div>', esc_html($warnings[$warn]));
+        }
+        // phpcs:enable
+    }
+
+    /**
+     * @return void
+     */
+    public static function handle_save()
+    {
+        check_admin_referer('mwrm_save');
+
+        if (!current_user_can(self::CAPABILITY)) {
+            wp_die(esc_html__('Not allowed.', 'manny-wenas-redirect-manager'), 403);
+        }
+
+        $id = isset($_POST['id']) ? absint($_POST['id']) : 0;
+        $result = MWRM_Repository::save(
+            array(
+                'source' => isset($_POST['source']) ? sanitize_text_field(wp_unslash($_POST['source'])) : '',
+                'target' => isset($_POST['target']) ? sanitize_text_field(wp_unslash($_POST['target'])) : '',
+                'type' => isset($_POST['type']) ? absint($_POST['type']) : 301,
+            ),
+            $id
+        );
+
+        $args = array('page' => 'mwrm-redirects');
+        if (is_wp_error($result)) {
+            $args['mwrm_error'] = rawurlencode($result->get_error_message());
+        } else {
+            $args['mwrm_msg'] = 'saved';
+            $row = MWRM_Repository::get($result);
+            $trace = MWRM_Repository::trace($row->source, $row->target);
+
+            if ($trace['loop']) {
+                $args['mwrm_warn'] = 'loop';
+            } elseif ($trace['hops'] > 0) {
+                $args['mwrm_warn'] = 'chain';
+            } elseif (MWRM_Repository::inbound($row->source)) {
+                $args['mwrm_warn'] = 'inbound';
+            }
+
+            MWRM_Log::delete_by_url(MWRM_Repository::relative_path(sanitize_text_field(wp_unslash($_POST['source']))));
+        }
+
+        wp_safe_redirect(add_query_arg($args, admin_url('admin.php')));
+        exit;
+    }
+
+    /**
+     * @return void
+     */
+    public static function handle_delete()
+    {
+        $id = isset($_GET['id']) ? absint($_GET['id']) : 0;
+
+        check_admin_referer('mwrm_delete_' . $id);
+
+        if (!current_user_can(self::CAPABILITY)) {
+            wp_die(esc_html__('Not allowed.', 'manny-wenas-redirect-manager'), 403);
+        }
+
+        MWRM_Repository::delete($id);
+
+        wp_safe_redirect(add_query_arg(array('page' => 'mwrm-redirects', 'mwrm_msg' => 'deleted'), admin_url('admin.php')));
+        exit;
+    }
+
+    /**
+     * @return void
+     */
+    public static function render_404()
+    {
+        if (!current_user_can(self::CAPABILITY)) {
+            return;
+        }
+
+        $rows = MWRM_Log::top();
+        $clear = wp_nonce_url(admin_url('admin-post.php?action=mwrm_404_clear'), 'mwrm_404_clear');
+
+        echo '<div class="wrap"><h1 class="wp-heading-inline">' . esc_html__('404 Monitor', 'manny-wenas-redirect-manager') . '</h1>';
+        if ($rows) {
+            printf(
+                ' <a href="%s" class="page-title-action">%s</a>',
+                esc_url($clear),
+                esc_html__('Clear log', 'manny-wenas-redirect-manager')
+            );
+        }
+        echo '<hr class="wp-header-end">';
+
+        if (isset($_GET['mwrm_msg'])) { // phpcs:ignore WordPress.Security.NonceVerification
+            printf('<div class="notice notice-success is-dismissible"><p>%s</p></div>', esc_html__('Done.', 'manny-wenas-redirect-manager'));
+        }
+
+        echo '<table class="widefat striped"><thead><tr>';
+        foreach (array(__('URL', 'manny-wenas-redirect-manager'), __('Hits', 'manny-wenas-redirect-manager'), __('Last seen', 'manny-wenas-redirect-manager'), __('Referrer', 'manny-wenas-redirect-manager'), '') as $heading) {
+            echo '<th>' . esc_html($heading) . '</th>';
+        }
+        echo '</tr></thead><tbody>';
+
+        if (!$rows) {
+            echo '<tr><td colspan="5">' . esc_html__('No 404s logged yet.', 'manny-wenas-redirect-manager') . '</td></tr>';
+        }
+
+        foreach ($rows as $row) {
+            $create = add_query_arg(
+                array('page' => 'mwrm-redirects', 'action' => 'add', 'source' => $row->url),
+                admin_url('admin.php')
+            );
+            $delete = wp_nonce_url(
+                admin_url('admin-post.php?action=mwrm_404_delete&id=' . (int) $row->id),
+                'mwrm_404_delete_' . $row->id
+            );
+
+            printf(
+                '<tr><td>%s</td><td>%d</td><td>%s</td><td>%s</td><td><a href="%s">%s</a> | <a href="%s">%s</a></td></tr>',
+                esc_html($row->url),
+                (int) $row->hits,
+                esc_html($row->last_seen),
+                esc_html($row->referrer),
+                esc_url($create),
+                esc_html__('Create redirect', 'manny-wenas-redirect-manager'),
+                esc_url($delete),
+                esc_html__('Ignore', 'manny-wenas-redirect-manager')
+            );
+        }
+
+        echo '</tbody></table></div>';
+    }
+
+    /**
+     * @return void
+     */
+    public static function render_import()
+    {
+        if (!current_user_can(self::CAPABILITY)) {
+            return;
+        }
+
+        $key = 'mwrm_import_' . get_current_user_id();
+        $result = get_transient($key);
+        delete_transient($key);
+
+        echo '<div class="wrap"><h1>' . esc_html__('Import', 'manny-wenas-redirect-manager') . '</h1>';
+
+        if (is_wp_error($result)) {
+            printf('<div class="notice notice-error"><p>%s</p></div>', esc_html($result->get_error_message()));
+        } elseif (is_array($result)) {
+            printf(
+                '<div class="notice notice-success"><p>%s</p></div>',
+                esc_html(sprintf(
+                    /* translators: 1: imported count, 2: skipped count. */
+                    __('%1$d redirects imported, %2$d skipped.', 'manny-wenas-redirect-manager'),
+                    $result['imported'],
+                    $result['skipped_total']
+                ))
+            );
+
+            if ($result['skipped']) {
+                echo '<h2>' . esc_html__('Skipped rows', 'manny-wenas-redirect-manager') . '</h2>';
+                echo '<table class="widefat striped"><thead><tr><th>' . esc_html__('Line', 'manny-wenas-redirect-manager') . '</th><th>'
+                    . esc_html__('Source', 'manny-wenas-redirect-manager') . '</th><th>'
+                    . esc_html__('Reason', 'manny-wenas-redirect-manager') . '</th></tr></thead><tbody>';
+                foreach ($result['skipped'] as $item) {
+                    printf(
+                        '<tr><td>%d</td><td>%s</td><td>%s</td></tr>',
+                        (int) $item['line'],
+                        esc_html($item['source']),
+                        esc_html($item['reason'])
+                    );
+                }
+                echo '</tbody></table>';
+                if ($result['skipped_total'] > count($result['skipped'])) {
+                    echo '<p>' . esc_html__('Only the first rows are listed.', 'manny-wenas-redirect-manager') . '</p>';
+                }
+            }
+        }
+        ?>
+        <p><?php esc_html_e('Import a CSV export from Rank Math, Yoast SEO Premium, All in One SEO or SEOPress. Exact and trailing-wildcard rules are imported; regex rules, query strings and existing sources are skipped.', 'manny-wenas-redirect-manager'); ?></p>
+        <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" enctype="multipart/form-data">
+            <input type="hidden" name="action" value="mwrm_import">
+            <?php wp_nonce_field('mwrm_import'); ?>
+            <input type="file" name="mwrm_csv" accept=".csv,text/csv" required>
+            <?php submit_button(__('Import', 'manny-wenas-redirect-manager'), 'primary', 'submit', false); ?>
+        </form>
+        </div>
+        <?php
+    }
+
+    /**
+     * @return void
+     */
+    public static function handle_import()
+    {
+        check_admin_referer('mwrm_import');
+
+        if (!current_user_can(self::CAPABILITY)) {
+            wp_die(esc_html__('Not allowed.', 'manny-wenas-redirect-manager'), 403);
+        }
+
+        $file = isset($_FILES['mwrm_csv']) ? $_FILES['mwrm_csv'] : null; // phpcs:ignore WordPress.Security
+        $result = null;
+
+        if (!$file || UPLOAD_ERR_OK !== $file['error'] || !is_uploaded_file($file['tmp_name'])) {
+            $result = new WP_Error('mwrm_import', __('Upload failed.', 'manny-wenas-redirect-manager'));
+        } elseif ('csv' !== strtolower(pathinfo(sanitize_file_name($file['name']), PATHINFO_EXTENSION))) {
+            $result = new WP_Error('mwrm_import', __('Please upload a .csv file.', 'manny-wenas-redirect-manager'));
+        } elseif ($file['size'] > MWRM_Importer::MAX_BYTES) {
+            $result = new WP_Error('mwrm_import', __('The file is larger than 2 MB.', 'manny-wenas-redirect-manager'));
+        } else {
+            $result = MWRM_Importer::import_file($file['tmp_name']);
+        }
+
+        set_transient('mwrm_import_' . get_current_user_id(), $result, 5 * MINUTE_IN_SECONDS);
+
+        wp_safe_redirect(add_query_arg(array('page' => 'mwrm-import'), admin_url('admin.php')));
+        exit;
+    }
+
+    /**
+     * @return void
+     */
+    public static function handle_404_delete()
+    {
+        $id = isset($_GET['id']) ? absint($_GET['id']) : 0;
+
+        check_admin_referer('mwrm_404_delete_' . $id);
+
+        if (!current_user_can(self::CAPABILITY)) {
+            wp_die(esc_html__('Not allowed.', 'manny-wenas-redirect-manager'), 403);
+        }
+
+        MWRM_Log::delete($id);
+
+        wp_safe_redirect(add_query_arg(array('page' => 'mwrm-404', 'mwrm_msg' => 'done'), admin_url('admin.php')));
+        exit;
+    }
+
+    /**
+     * @return void
+     */
+    public static function handle_404_clear()
+    {
+        check_admin_referer('mwrm_404_clear');
+
+        if (!current_user_can(self::CAPABILITY)) {
+            wp_die(esc_html__('Not allowed.', 'manny-wenas-redirect-manager'), 403);
+        }
+
+        MWRM_Log::clear();
+
+        wp_safe_redirect(add_query_arg(array('page' => 'mwrm-404', 'mwrm_msg' => 'done'), admin_url('admin.php')));
+        exit;
+    }
+
+    /**
+     * @param string $title Screen title.
+     * @return void
+     */
+    private static function render_placeholder($title)
+    {
+        if (!current_user_can(self::CAPABILITY)) {
+            return;
+        }
+
+        printf(
+            '<div class="wrap"><h1>%s</h1><p>%s</p></div>',
+            esc_html($title),
+            esc_html__('Coming soon.', 'manny-wenas-redirect-manager')
+        );
+    }
+}
