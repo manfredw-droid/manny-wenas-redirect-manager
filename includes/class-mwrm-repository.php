@@ -25,10 +25,11 @@ class MWRM_Repository
      * Normalize a request path: strip scheme/host/query, lowercase,
      * no trailing slash, always one leading slash. Keeps a trailing "*".
      *
-     * @param string $url URL or path.
+     * @param string $url   URL or path.
+     * @param bool   $lower Lowercase the result (default). False keeps the original case.
      * @return string
      */
-    public static function normalize_path($url)
+    public static function normalize_path($url, $lower = true)
     {
         $path = (string) wp_parse_url(trim($url), PHP_URL_PATH);
         $path = '/' . ltrim(rawurldecode($path), '/');
@@ -37,19 +38,20 @@ class MWRM_Repository
             $path = untrailingslashit($path);
         }
 
-        return strtolower($path);
+        return $lower ? strtolower($path) : $path;
     }
 
     /**
      * Normalized path relative to the site root (subdirectory installs stripped).
      *
-     * @param string $url URL or path.
+     * @param string $url   URL or path.
+     * @param bool   $lower Lowercase the result (default).
      * @return string
      */
-    public static function relative_path($url)
+    public static function relative_path($url, $lower = true)
     {
-        $path = self::normalize_path($url);
-        $home = self::normalize_path(home_url());
+        $path = self::normalize_path($url, $lower);
+        $home = self::normalize_path(home_url(), $lower);
 
         if ('/' !== $home && 0 === strpos($path, $home)) {
             $path = '/' . ltrim(substr($path, strlen($home)), '/');
@@ -96,11 +98,31 @@ class MWRM_Repository
         global $wpdb;
 
         $source = self::relative_path($data['source']);
-        $target = esc_url_raw(trim($data['target']));
+        $target = trim($data['target']);
         $type = (int) $data['type'];
+
+        // A bare relative target would otherwise be turned into "http://target" by esc_url_raw().
+        if ('' !== $target && !preg_match('#^([a-z][a-z0-9+.-]*:|/)#i', $target)) {
+            $target = '/' . $target;
+        }
+
+        $target = esc_url_raw($target);
 
         if ('/' === $source || '' === $target) {
             return new WP_Error('mwrm_invalid', __('Source and target are required.', 'manny-wenas-redirect-manager'));
+        }
+
+        // "/*" would redirect the whole site.
+        if ('/*' === $source) {
+            return new WP_Error('mwrm_root', __('A wildcard on the site root is not allowed.', 'manny-wenas-redirect-manager'));
+        }
+
+        $existing = $wpdb->get_var(
+            $wpdb->prepare('SELECT id FROM ' . self::table() . ' WHERE source = %s AND id <> %d LIMIT 1', $source, (int) $id)
+        );
+
+        if ($existing) {
+            return new WP_Error('mwrm_duplicate', __('A redirect for this source already exists.', 'manny-wenas-redirect-manager'));
         }
 
         if (!in_array($type, array(301, 302), true)) {
@@ -144,10 +166,11 @@ class MWRM_Repository
     /**
      * Find the redirect for a request path. Exact matches win over wildcards.
      *
-     * @param string $path Normalized request path.
+     * @param string      $path     Normalized (lowercase) request path.
+     * @param string|null $original Same path with its original case, used for the wildcard capture.
      * @return object|null Row with an added resolved_target property.
      */
-    public static function match($path)
+    public static function match($path, $original = null)
     {
         global $wpdb;
 
@@ -169,7 +192,7 @@ class MWRM_Repository
             $prefix = substr($rule->source, 0, -1); // "/old/".
 
             if (0 === strpos($path . '/', $prefix)) {
-                $rest = substr($path . '/', strlen($prefix));
+                $rest = substr(($original ? $original : $path) . '/', strlen($prefix));
                 $rule->resolved_target = str_replace('*', rtrim($rest, '/'), $rule->target);
 
                 return $rule;
