@@ -72,6 +72,19 @@ class MWRM_Repository
     }
 
     /**
+     * @param string $source Source path or URL.
+     * @return bool
+     */
+    public static function source_exists($source)
+    {
+        global $wpdb;
+
+        return (bool) $wpdb->get_var(
+            $wpdb->prepare('SELECT id FROM ' . self::table() . ' WHERE source = %s LIMIT 1', self::relative_path($source))
+        );
+    }
+
+    /**
      * Insert or update a redirect.
      *
      * @param array $data {source, target, type}.

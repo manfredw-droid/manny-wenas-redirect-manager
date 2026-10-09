@@ -23,6 +23,7 @@ class MWRM_Admin
         add_action('admin_post_mwrm_delete', array(__CLASS__, 'handle_delete'));
         add_action('admin_post_mwrm_404_delete', array(__CLASS__, 'handle_404_delete'));
         add_action('admin_post_mwrm_404_clear', array(__CLASS__, 'handle_404_clear'));
+        add_action('admin_post_mwrm_import', array(__CLASS__, 'handle_import'));
     }
 
     /**
@@ -280,7 +281,88 @@ class MWRM_Admin
      */
     public static function render_import()
     {
-        self::render_placeholder(__('Import', 'manny-wenas-redirect-manager'));
+        if (!current_user_can(self::CAPABILITY)) {
+            return;
+        }
+
+        $key = 'mwrm_import_' . get_current_user_id();
+        $result = get_transient($key);
+        delete_transient($key);
+
+        echo '<div class="wrap"><h1>' . esc_html__('Import', 'manny-wenas-redirect-manager') . '</h1>';
+
+        if (is_wp_error($result)) {
+            printf('<div class="notice notice-error"><p>%s</p></div>', esc_html($result->get_error_message()));
+        } elseif (is_array($result)) {
+            printf(
+                '<div class="notice notice-success"><p>%s</p></div>',
+                esc_html(sprintf(
+                    /* translators: 1: imported count, 2: skipped count. */
+                    __('%1$d redirects imported, %2$d skipped.', 'manny-wenas-redirect-manager'),
+                    $result['imported'],
+                    $result['skipped_total']
+                ))
+            );
+
+            if ($result['skipped']) {
+                echo '<h2>' . esc_html__('Skipped rows', 'manny-wenas-redirect-manager') . '</h2>';
+                echo '<table class="widefat striped"><thead><tr><th>' . esc_html__('Line', 'manny-wenas-redirect-manager') . '</th><th>'
+                    . esc_html__('Source', 'manny-wenas-redirect-manager') . '</th><th>'
+                    . esc_html__('Reason', 'manny-wenas-redirect-manager') . '</th></tr></thead><tbody>';
+                foreach ($result['skipped'] as $item) {
+                    printf(
+                        '<tr><td>%d</td><td>%s</td><td>%s</td></tr>',
+                        (int) $item['line'],
+                        esc_html($item['source']),
+                        esc_html($item['reason'])
+                    );
+                }
+                echo '</tbody></table>';
+                if ($result['skipped_total'] > count($result['skipped'])) {
+                    echo '<p>' . esc_html__('Only the first rows are listed.', 'manny-wenas-redirect-manager') . '</p>';
+                }
+            }
+        }
+        ?>
+        <p><?php esc_html_e('Import a CSV export from Rank Math, Yoast SEO Premium, All in One SEO or SEOPress. Exact and trailing-wildcard rules are imported; regex rules, query strings and existing sources are skipped.', 'manny-wenas-redirect-manager'); ?></p>
+        <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" enctype="multipart/form-data">
+            <input type="hidden" name="action" value="mwrm_import">
+            <?php wp_nonce_field('mwrm_import'); ?>
+            <input type="file" name="mwrm_csv" accept=".csv,text/csv" required>
+            <?php submit_button(__('Import', 'manny-wenas-redirect-manager'), 'primary', 'submit', false); ?>
+        </form>
+        </div>
+        <?php
+    }
+
+    /**
+     * @return void
+     */
+    public static function handle_import()
+    {
+        check_admin_referer('mwrm_import');
+
+        if (!current_user_can(self::CAPABILITY)) {
+            wp_die(esc_html__('Not allowed.', 'manny-wenas-redirect-manager'), 403);
+        }
+
+        $file = isset($_FILES['mwrm_csv']) ? $_FILES['mwrm_csv'] : null; // phpcs:ignore WordPress.Security
+        $result = null;
+
+        if (!$file || UPLOAD_ERR_OK !== $file['error'] || !is_uploaded_file($file['tmp_name'])) {
+            $result = new WP_Error('mwrm_import', __('Upload failed.', 'manny-wenas-redirect-manager'));
+        } elseif ('csv' !== strtolower(pathinfo(sanitize_file_name($file['name']), PATHINFO_EXTENSION))) {
+            $result = new WP_Error('mwrm_import', __('Please upload a .csv file.', 'manny-wenas-redirect-manager'));
+        } elseif ($file['size'] > MWRM_Importer::MAX_BYTES) {
+            $result = new WP_Error('mwrm_import', __('The file is larger than 2 MB.', 'manny-wenas-redirect-manager'));
+        } else {
+            $result = MWRM_Importer::import_file($file['tmp_name']);
+        }
+
+        set_transient('mwrm_import_' . get_current_user_id(), $result, 5 * MINUTE_IN_SECONDS);
+
+        wp_safe_redirect(add_query_arg(array('page' => 'mwrm-import'), admin_url('admin.php')));
+        exit;
     }
 
     /**
