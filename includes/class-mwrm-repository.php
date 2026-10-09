@@ -53,7 +53,7 @@ class MWRM_Repository
         $path = self::normalize_path($url, $lower);
         $home = self::normalize_path(home_url(), $lower);
 
-        if ('/' !== $home && 0 === strpos($path, $home)) {
+        if ('/' !== $home && 0 === strpos($path, $home) && (strlen($path) === strlen($home) || '/' === $path[strlen($home)])) {
             $path = '/' . ltrim(substr($path, strlen($home)), '/');
         }
 
@@ -141,13 +141,21 @@ class MWRM_Repository
         );
 
         if ($id) {
-            $wpdb->update(self::table(), $row, array('id' => (int) $id));
+            $result = $wpdb->update(self::table(), $row, array('id' => (int) $id));
+
+            if (false === $result) {
+                return new WP_Error('mwrm_db', __('Could not update the redirect.', 'manny-wenas-redirect-manager') . ' ' . $wpdb->last_error);
+            }
 
             return (int) $id;
         }
 
         $row['created_at'] = current_time('mysql');
-        $wpdb->insert(self::table(), $row);
+        $result = $wpdb->insert(self::table(), $row);
+
+        if (false === $result) {
+            return new WP_Error('mwrm_db', __('Could not save the redirect.', 'manny-wenas-redirect-manager') . ' ' . $wpdb->last_error);
+        }
 
         return (int) $wpdb->insert_id;
     }
