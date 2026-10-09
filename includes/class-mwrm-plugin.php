@@ -27,11 +27,10 @@ class MWRM_Plugin
         MWRM_Integration::init();
         MWRM_Slug_Watcher::init();
         MWRM_Handler::init();
+        MWRM_Log::init();
 
         if (is_admin()) {
             MWRM_Admin::init();
         }
-
-        // TODO: 404 logger.
     }
 }
