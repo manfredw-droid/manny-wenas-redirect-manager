@@ -26,7 +26,10 @@ define('MWRM_URL', plugin_dir_url(__FILE__));
 require_once MWRM_PATH . 'includes/class-mwrm-installer.php';
 require_once MWRM_PATH . 'includes/class-mwrm-integration.php';
 require_once MWRM_PATH . 'includes/class-mwrm-slug-watcher.php';
+require_once MWRM_PATH . 'includes/class-mwrm-repository.php';
+require_once MWRM_PATH . 'includes/class-mwrm-handler.php';
 require_once MWRM_PATH . 'includes/class-mwrm-plugin.php';
+require_once MWRM_PATH . 'admin/class-mwrm-list-table.php';
 require_once MWRM_PATH . 'admin/class-mwrm-admin.php';
 
 register_activation_hook(__FILE__, array('MWRM_Installer', 'activate'));
