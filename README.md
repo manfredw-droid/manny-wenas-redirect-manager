@@ -1,19 +1,19 @@
 # Manny Wenas Redirect Manager
 
-Standalone WordPress redirect manager. Works without Manny Wenas SEO; when that
-plugin is active an integration notice is shown.
+Standalone WordPress redirect manager. Works without Manny Wenas SEO. When that
+plugin is active, Redirect Manager's screens appear under its admin menu.
 
-**Version:** 1.0.1
+**Version:** 1.0.2
 
 ## Features
 
 - 301/302 redirects with sortable overview list (hits counter included)
 - Wildcard redirects (`/old/*` → `/new/*`) — longer prefixes take priority
-- Redirect chain detection with inline warning (chains are blocked before saving)
+- Redirect chain detection with an inline warning after saving
 - 404 monitor with per-URL hit counts and last-seen referrer
 - Prompt to create a redirect when a WordPress post/page slug changes
 - CSV import (Rank Math and plain source/target/type format)
-- Optional integration notice when Manny Wenas SEO is active
+- Optional menu integration when Manny Wenas SEO is active
 
 ## Import
 

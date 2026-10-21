@@ -18,7 +18,7 @@ class MWRM_Admin
      */
     public static function init()
     {
-        add_action('admin_menu', array(__CLASS__, 'register_menu'));
+        add_action('admin_menu', array(__CLASS__, 'register_menu'), 30);
         add_action('admin_post_mwrm_save', array(__CLASS__, 'handle_save'));
         add_action('admin_post_mwrm_delete', array(__CLASS__, 'handle_delete'));
         add_action('admin_post_mwrm_404_delete', array(__CLASS__, 'handle_404_delete'));
@@ -31,18 +31,32 @@ class MWRM_Admin
      */
     public static function register_menu()
     {
-        add_menu_page(
-            __('Redirects', 'manny-wenas-redirect-manager'),
-            __('Redirects', 'manny-wenas-redirect-manager'),
-            self::CAPABILITY,
-            'mwrm-redirects',
-            array(__CLASS__, 'render_redirects'),
-            'dashicons-randomize',
-            80
-        );
+        $parent = 'mwrm-redirects';
+
+        if (MWRM_Integration::is_seo_active() && self::has_seo_menu()) {
+            $parent = 'mwseo';
+            add_submenu_page(
+                $parent,
+                __('Redirects', 'manny-wenas-redirect-manager'),
+                __('Redirects', 'manny-wenas-redirect-manager'),
+                self::CAPABILITY,
+                'mwrm-redirects',
+                array(__CLASS__, 'render_redirects')
+            );
+        } else {
+            add_menu_page(
+                __('Redirects', 'manny-wenas-redirect-manager'),
+                __('Redirects', 'manny-wenas-redirect-manager'),
+                self::CAPABILITY,
+                'mwrm-redirects',
+                array(__CLASS__, 'render_redirects'),
+                'dashicons-randomize',
+                80
+            );
+        }
 
         add_submenu_page(
-            'mwrm-redirects',
+            $parent,
             __('404 Monitor', 'manny-wenas-redirect-manager'),
             __('404 Monitor', 'manny-wenas-redirect-manager'),
             self::CAPABILITY,
@@ -51,13 +65,35 @@ class MWRM_Admin
         );
 
         add_submenu_page(
-            'mwrm-redirects',
+            $parent,
             __('Import', 'manny-wenas-redirect-manager'),
             __('Import', 'manny-wenas-redirect-manager'),
             self::CAPABILITY,
             'mwrm-import',
             array(__CLASS__, 'render_import')
         );
+    }
+
+    /**
+     * Check that the SEO plugin has registered its top-level menu.
+     *
+     * @return bool
+     */
+    private static function has_seo_menu()
+    {
+        global $menu;
+
+        if (!is_array($menu)) {
+            return false;
+        }
+
+        foreach ($menu as $item) {
+            if (isset($item[2]) && 'mwseo' === $item[2]) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**

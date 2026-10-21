@@ -62,19 +62,28 @@ class MWRM_List_Table extends WP_List_Table
 
         // phpcs:disable WordPress.Security.NonceVerification
         $allowed = array('source', 'hits');
-        $orderby = isset($_GET['orderby']) && in_array($_GET['orderby'], $allowed, true) ? $_GET['orderby'] : 'id';
-        $order = isset($_GET['order']) && 'asc' === $_GET['order'] ? 'ASC' : 'DESC';
+        $requested_orderby = isset($_GET['orderby']) ? sanitize_key(wp_unslash($_GET['orderby'])) : '';
+        $orderby = in_array($requested_orderby, $allowed, true) ? $requested_orderby : 'id';
+        $requested_order = isset($_GET['order']) ? sanitize_key(wp_unslash($_GET['order'])) : '';
+        $ascending = 'asc' === $requested_order;
         // phpcs:enable
 
         $paged = $this->get_pagenum();
         $table = MWRM_Repository::table();
 
-        $total = (int) $wpdb->get_var("SELECT COUNT(*) FROM {$table}");
-        $this->items = $wpdb->get_results($wpdb->prepare(
-            "SELECT * FROM {$table} ORDER BY {$orderby} {$order} LIMIT %d OFFSET %d",
-            self::PER_PAGE,
-            ($paged - 1) * self::PER_PAGE
-        ));
+        $total = (int) $wpdb->get_var($wpdb->prepare('SELECT COUNT(*) FROM %i', $table));
+        $offset = ($paged - 1) * self::PER_PAGE;
+        if ($ascending) {
+            $this->items = $wpdb->get_results($wpdb->prepare(
+                'SELECT * FROM %i ORDER BY %i ASC LIMIT %d OFFSET %d',
+                $table, $orderby, self::PER_PAGE, $offset
+            ));
+        } else {
+            $this->items = $wpdb->get_results($wpdb->prepare(
+                'SELECT * FROM %i ORDER BY %i DESC LIMIT %d OFFSET %d',
+                $table, $orderby, self::PER_PAGE, $offset
+            ));
+        }
 
         $this->set_pagination_args(array('total_items' => $total, 'per_page' => self::PER_PAGE));
     }
