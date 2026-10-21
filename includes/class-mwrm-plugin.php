@@ -18,12 +18,6 @@ class MWRM_Plugin
      */
     public static function init()
     {
-        load_plugin_textdomain(
-            'manny-wenas-redirect-manager',
-            false,
-            dirname(plugin_basename(MWRM_FILE)) . '/languages'
-        );
-
         MWRM_Slug_Watcher::init();
         MWRM_Handler::init();
         MWRM_Log::init();

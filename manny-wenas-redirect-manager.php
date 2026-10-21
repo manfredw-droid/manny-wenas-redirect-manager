@@ -3,7 +3,7 @@
  * Plugin Name:       Manny Wenas Redirect Manager
  * Description:       301/302 redirect manager with wildcard redirects, redirect chain detection and a 404 monitor.
  * Version:           1.0.2
- * Requires at least: 5.8
+ * Requires at least: 6.2
  * Requires PHP:      7.4
  * Author:            Manfred Wenas
  * License:           GPL v2 or later

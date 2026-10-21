@@ -69,7 +69,7 @@ class MWRM_Repository
         global $wpdb;
 
         return $wpdb->get_row(
-            $wpdb->prepare('SELECT * FROM ' . self::table() . ' WHERE id = %d', $id)
+            $wpdb->prepare('SELECT * FROM %i WHERE id = %d', self::table(), $id)
         );
     }
 
@@ -82,7 +82,7 @@ class MWRM_Repository
         global $wpdb;
 
         return (bool) $wpdb->get_var(
-            $wpdb->prepare('SELECT id FROM ' . self::table() . ' WHERE source = %s LIMIT 1', self::relative_path($source))
+            $wpdb->prepare('SELECT id FROM %i WHERE source = %s LIMIT 1', self::table(), self::relative_path($source))
         );
     }
 
@@ -118,7 +118,7 @@ class MWRM_Repository
         }
 
         $existing = $wpdb->get_var(
-            $wpdb->prepare('SELECT id FROM ' . self::table() . ' WHERE source = %s AND id <> %d LIMIT 1', $source, (int) $id)
+            $wpdb->prepare('SELECT id FROM %i WHERE source = %s AND id <> %d LIMIT 1', self::table(), $source, (int) $id)
         );
 
         if ($existing) {
@@ -183,7 +183,7 @@ class MWRM_Repository
         global $wpdb;
 
         $row = $wpdb->get_row(
-            $wpdb->prepare('SELECT * FROM ' . self::table() . ' WHERE is_wildcard = 0 AND source = %s LIMIT 1', $path)
+            $wpdb->prepare('SELECT * FROM %i WHERE is_wildcard = 0 AND source = %s LIMIT 1', self::table(), $path)
         );
 
         if ($row) {
@@ -193,7 +193,7 @@ class MWRM_Repository
         }
 
         $wildcards = $wpdb->get_results(
-            'SELECT * FROM ' . self::table() . ' WHERE is_wildcard = 1 ORDER BY CHAR_LENGTH(source) DESC'
+            $wpdb->prepare('SELECT * FROM %i WHERE is_wildcard = 1 ORDER BY CHAR_LENGTH(source) DESC', self::table())
         );
 
         foreach ($wildcards as $rule) {
@@ -276,7 +276,8 @@ class MWRM_Repository
         }
 
         $rows = $wpdb->get_results($wpdb->prepare(
-            'SELECT id, source, target FROM ' . self::table() . ' WHERE target LIKE %s',
+            'SELECT id, source, target FROM %i WHERE target LIKE %s',
+            self::table(),
             '%' . $wpdb->esc_like(basename($source)) . '%'
         ));
 
@@ -293,6 +294,6 @@ class MWRM_Repository
     {
         global $wpdb;
 
-        $wpdb->query($wpdb->prepare('UPDATE ' . self::table() . ' SET hits = hits + 1 WHERE id = %d', $id));
+        $wpdb->query($wpdb->prepare('UPDATE %i SET hits = hits + 1 WHERE id = %d', self::table(), $id));
     }
 }
