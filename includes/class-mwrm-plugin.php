@@ -24,7 +24,6 @@ class MWRM_Plugin
             dirname(plugin_basename(MWRM_FILE)) . '/languages'
         );
 
-        MWRM_Integration::init();
         MWRM_Slug_Watcher::init();
         MWRM_Handler::init();
         MWRM_Log::init();
