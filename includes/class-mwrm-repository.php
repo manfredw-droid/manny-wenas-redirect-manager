@@ -97,7 +97,7 @@ class MWRM_Repository
     /**
      * Insert or update a redirect.
      *
-     * @param array $data {source, target, type}.
+     * @param array $data {source, target, type, matching (optional: regex)}.
      * @param int   $id   Existing ID, 0 to insert.
      * @return int|WP_Error Redirect ID.
      */
@@ -109,7 +109,8 @@ class MWRM_Repository
             return new WP_Error('mwrm_db', __('The redirect tables are not available.', 'manny-wenas-redirect-manager'));
         }
 
-        $source = self::relative_path($data['source']);
+        $is_regex = isset($data['matching']) && 'regex' === $data['matching'];
+        $source = $is_regex ? trim((string) $data['source']) : self::relative_path($data['source']);
         $target = trim($data['target']);
         $type = (int) $data['type'];
 
@@ -120,12 +121,16 @@ class MWRM_Repository
 
         $target = esc_url_raw($target);
 
-        if ('/' === $source || '' === $target) {
+        if ('' === $source || ('/' === $source && !$is_regex) || '' === $target) {
             return new WP_Error('mwrm_invalid', __('Source and target are required.', 'manny-wenas-redirect-manager'));
         }
 
+        if ($is_regex && !self::valid_regex($source)) {
+            return new WP_Error('mwrm_regex', __('Use an anchored path pattern such as ^/old/([0-9]+)$; it must be valid and must not match the home page.', 'manny-wenas-redirect-manager'));
+        }
+
         // "/*" would redirect the whole site.
-        if ('/*' === $source) {
+        if (!$is_regex && '/*' === $source) {
             return new WP_Error('mwrm_root', __('A wildcard on the site root is not allowed.', 'manny-wenas-redirect-manager'));
         }
 
@@ -141,11 +146,11 @@ class MWRM_Repository
             $type = 301;
         }
 
-        if ($source === self::normalize_path($target) && '/*' !== substr($source, -2)) {
+        if (!$is_regex && $source === self::normalize_path($target) && '/*' !== substr($source, -2)) {
             return new WP_Error('mwrm_loop', __('Source and target are the same.', 'manny-wenas-redirect-manager'));
         }
 
-        if (self::is_inert($source, $target)) {
+        if (!$is_regex && self::is_inert($source, $target)) {
             return new WP_Error('mwrm_self', __('This wildcard would send every matching URL back into its own source path, so it would never apply.', 'manny-wenas-redirect-manager'));
         }
 
@@ -153,7 +158,8 @@ class MWRM_Repository
             'source' => $source,
             'target' => $target,
             'type' => $type,
-            'is_wildcard' => '/*' === substr($source, -2) ? 1 : 0,
+            'is_wildcard' => !$is_regex && '/*' === substr($source, -2) ? 1 : 0,
+            'is_regex' => $is_regex ? 1 : 0,
         );
 
         if ($id) {
@@ -163,6 +169,7 @@ class MWRM_Repository
                 return new WP_Error('mwrm_db', __('Could not update the redirect.', 'manny-wenas-redirect-manager') . ' ' . $wpdb->last_error);
             }
 
+            delete_transient('mwrm_regex_rules');
             return (int) $id;
         }
 
@@ -173,6 +180,7 @@ class MWRM_Repository
             return new WP_Error('mwrm_db', __('Could not save the redirect.', 'manny-wenas-redirect-manager') . ' ' . $wpdb->last_error);
         }
 
+        delete_transient('mwrm_regex_rules');
         return (int) $wpdb->insert_id;
     }
 
@@ -189,6 +197,7 @@ class MWRM_Repository
         }
 
         $wpdb->delete(self::table(), array('id' => (int) $id));
+        delete_transient('mwrm_regex_rules');
     }
 
     /**
@@ -228,7 +237,7 @@ class MWRM_Repository
         $error = '';
 
         $row = $wpdb->get_row(
-            $wpdb->prepare('SELECT * FROM %i WHERE is_wildcard = 0 AND source = %s LIMIT 1', self::table(), $path)
+            $wpdb->prepare('SELECT * FROM %i WHERE is_wildcard = 0 AND is_regex = 0 AND source = %s LIMIT 1', self::table(), $path)
         );
 
         if ($row) {
@@ -244,7 +253,7 @@ class MWRM_Repository
         }
 
         $wildcards = $wpdb->get_results(
-            $wpdb->prepare('SELECT * FROM %i WHERE is_wildcard = 1 ORDER BY CHAR_LENGTH(source) DESC', self::table())
+            $wpdb->prepare('SELECT * FROM %i WHERE is_wildcard = 1 AND is_regex = 0 ORDER BY CHAR_LENGTH(source) DESC', self::table())
         );
 
         $error = (string) $wpdb->last_error;
@@ -260,7 +269,102 @@ class MWRM_Repository
             }
         }
 
+        if ('' !== $error) {
+            return null;
+        }
+
+        // Regex is deliberately last: existing exact and wildcard rules keep priority.
+        $rules = get_transient('mwrm_regex_rules');
+        if (false === $rules) {
+            $rules = $wpdb->get_results(
+                $wpdb->prepare('SELECT * FROM %i WHERE is_regex = 1 ORDER BY id ASC', self::table())
+            );
+            $error = (string) $wpdb->last_error;
+            if ('' !== $error) {
+                return null;
+            }
+            set_transient('mwrm_regex_rules', $rules, 5 * MINUTE_IN_SECONDS);
+        }
+
+        $request = null !== $original ? $original : $path;
+        foreach ($rules as $rule) {
+            $pattern = self::regex_pattern($rule->source);
+            if (null === $pattern || 1 !== @preg_match($pattern, $request, $matches)) {
+                continue;
+            }
+
+            $resolved = self::regex_target($rule->target, $matches);
+            if (null === $resolved) {
+                continue;
+            }
+
+            // Never redirect to the same URL or into the same regex rule again.
+            if (self::is_internal($resolved)) {
+                $destination = self::relative_path($resolved, false);
+                if ($destination === $request || 1 === @preg_match($pattern, $destination)) {
+                    continue;
+                }
+            }
+
+            $rule->resolved_target = $resolved;
+            return $rule;
+        }
+
         return null;
+    }
+
+    /**
+     * Regexes match the decoded path relative to the site's home URL, without
+     * a trailing slash. The source must be anchored so it cannot catch a whole
+     * site by accident. A per-match PCRE limit prevents costly expressions.
+     *
+     * @param string $source Pattern without delimiters.
+     * @return string|null PCRE pattern, or null when invalid.
+     */
+    private static function regex_pattern($source)
+    {
+        if (strlen($source) > 255 || 0 !== strpos($source, '^/') || '$' !== substr($source, -1)
+            || false !== strpos($source, '#') || preg_match('/[\x00\r\n]/', $source)) {
+            return null;
+        }
+
+        $pattern = '#(*LIMIT_MATCH=100000)(*LIMIT_RECURSION=10000)' . $source . '#i';
+        return false === @preg_match($pattern, '') ? null : $pattern;
+    }
+
+    /**
+     * @param string $source Pattern without delimiters.
+     * @return bool
+     */
+    public static function valid_regex($source)
+    {
+        $pattern = self::regex_pattern($source);
+        if (null === $pattern) {
+            return false;
+        }
+        return 0 === @preg_match($pattern, '/');
+    }
+
+    /**
+     * Replace $1, $2, etc. with captures without interpreting replacement code.
+     * An absent capture means this rule does not apply to this request.
+     *
+     * @param string $target  Destination template.
+     * @param array  $matches PCRE captures.
+     * @return string|null
+     */
+    private static function regex_target($target, array $matches)
+    {
+        $missing = false;
+        $resolved = preg_replace_callback('/\$(\d{1,2})/', function ($token) use ($matches, &$missing) {
+            $number = (int) $token[1];
+            if (!isset($matches[$number])) {
+                $missing = true;
+                return '';
+            }
+            return $matches[$number];
+        }, $target);
+        return $missing ? null : $resolved;
     }
 
     /**

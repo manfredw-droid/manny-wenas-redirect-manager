@@ -3,12 +3,13 @@
 Standalone WordPress redirect manager. Works without Manny Wenas SEO. When that
 plugin is active, Redirect Manager's screens appear under its admin menu.
 
-**Version:** 1.0.3
+**Version:** 1.0.4
 
 ## Features
 
 - 301/302 redirects with sortable overview list (hits counter included)
 - Wildcard redirects (`/old/*` → `/new/*`) — longer prefixes take priority
+- Regex redirects (`^/old/([0-9]+)$` → `/new/$1`) — exact and wildcard rules take priority
 - Redirect chain detection with an inline warning after saving
 - 404 monitor with per-URL hit counts and last-seen referrer
 - Prompt to create a redirect when a WordPress post/page slug changes

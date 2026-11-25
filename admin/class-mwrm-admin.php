@@ -146,6 +146,7 @@ class MWRM_Admin
         $source = $row ? $row->source : $prefill;
         $target = $row ? $row->target : '';
         $type = $row ? (int) $row->type : 301;
+        $matching = $row && !empty($row->is_regex) ? 'regex' : 'path';
         ?>
         <div class="wrap">
             <h1><?php echo $row ? esc_html__('Edit redirect', 'manny-wenas-redirect-manager') : esc_html__('Add redirect', 'manny-wenas-redirect-manager'); ?></h1>
@@ -155,17 +156,26 @@ class MWRM_Admin
                 <?php wp_nonce_field('mwrm_save'); ?>
                 <table class="form-table" role="presentation">
                     <tr>
+                        <th><label for="mwrm-matching"><?php esc_html_e('Matching', 'manny-wenas-redirect-manager'); ?></label></th>
+                        <td>
+                            <select id="mwrm-matching" name="matching">
+                                <option value="path" <?php selected($matching, 'path'); ?>><?php esc_html_e('Path or wildcard', 'manny-wenas-redirect-manager'); ?></option>
+                                <option value="regex" <?php selected($matching, 'regex'); ?>><?php esc_html_e('Regular expression', 'manny-wenas-redirect-manager'); ?></option>
+                            </select>
+                        </td>
+                    </tr>
+                    <tr>
                         <th><label for="mwrm-source"><?php esc_html_e('Source', 'manny-wenas-redirect-manager'); ?></label></th>
                         <td>
                             <input type="text" id="mwrm-source" name="source" class="regular-text" value="<?php echo esc_attr($source); ?>" required>
-                            <p class="description"><?php esc_html_e('Path, e.g. /old-page. Use /old/* for a wildcard.', 'manny-wenas-redirect-manager'); ?></p>
+                            <p class="description"><?php esc_html_e('Path: /old-page or /old/*. Regex: ^/old/([0-9]+)$ (relative to the site root, without a trailing slash).', 'manny-wenas-redirect-manager'); ?></p>
                         </td>
                     </tr>
                     <tr>
                         <th><label for="mwrm-target"><?php esc_html_e('Target', 'manny-wenas-redirect-manager'); ?></label></th>
                         <td>
                             <input type="text" id="mwrm-target" name="target" class="regular-text" value="<?php echo esc_attr($target); ?>" required>
-                            <p class="description"><?php esc_html_e('Path or full URL. Use /new/* to reuse the wildcard part.', 'manny-wenas-redirect-manager'); ?></p>
+                            <p class="description"><?php esc_html_e('Path or full URL. Wildcard: /new/*. Regex: /new/$1 uses the first captured group.', 'manny-wenas-redirect-manager'); ?></p>
                         </td>
                     </tr>
                     <tr>
@@ -196,6 +206,7 @@ class MWRM_Admin
             'mwrm_root' => __('A wildcard on the site root is not allowed.', 'manny-wenas-redirect-manager'),
             'mwrm_duplicate' => __('A redirect for this source already exists.', 'manny-wenas-redirect-manager'),
             'mwrm_self' => __('This wildcard would send every matching URL back into its own source path, so it would never apply.', 'manny-wenas-redirect-manager'),
+            'mwrm_regex' => __('Use an anchored path pattern such as ^/old/([0-9]+)$; it must be valid and must not match the home page.', 'manny-wenas-redirect-manager'),
         );
         $error = isset($_GET['mwrm_error']) ? sanitize_key($_GET['mwrm_error']) : '';
 
@@ -230,11 +241,14 @@ class MWRM_Admin
         }
 
         $id = isset($_POST['id']) ? absint($_POST['id']) : 0;
+        $matching = isset($_POST['matching']) && is_string($_POST['matching']) && 'regex' === sanitize_key(wp_unslash($_POST['matching'])) ? 'regex' : 'path';
+        $source = isset($_POST['source']) && is_string($_POST['source']) ? wp_unslash($_POST['source']) : '';
         $result = MWRM_Repository::save(
             array(
-                'source' => isset($_POST['source']) ? sanitize_text_field(wp_unslash($_POST['source'])) : '',
+                'source' => 'regex' === $matching ? wp_check_invalid_utf8($source) : sanitize_text_field($source),
                 'target' => isset($_POST['target']) ? sanitize_text_field(wp_unslash($_POST['target'])) : '',
                 'type' => isset($_POST['type']) ? absint($_POST['type']) : 301,
+                'matching' => $matching,
             ),
             $id
         );
@@ -245,19 +259,19 @@ class MWRM_Admin
         } else {
             $args['mwrm_msg'] = 'saved';
             $row = MWRM_Repository::get($result);
-            $trace = MWRM_Repository::trace($row->source, $row->target);
-
-            if ($trace['loop']) {
-                $args['mwrm_warn'] = 'loop';
-            } elseif ($trace['limit']) {
-                $args['mwrm_warn'] = 'limit';
-            } elseif ($trace['hops'] > 0) {
-                $args['mwrm_warn'] = 'chain';
-            } elseif (MWRM_Repository::inbound($row->source)) {
-                $args['mwrm_warn'] = 'inbound';
+            if (empty($row->is_regex)) {
+                $trace = MWRM_Repository::trace($row->source, $row->target);
+                if ($trace['loop']) {
+                    $args['mwrm_warn'] = 'loop';
+                } elseif ($trace['limit']) {
+                    $args['mwrm_warn'] = 'limit';
+                } elseif ($trace['hops'] > 0) {
+                    $args['mwrm_warn'] = 'chain';
+                } elseif (MWRM_Repository::inbound($row->source)) {
+                    $args['mwrm_warn'] = 'inbound';
+                }
+                MWRM_Log::delete_by_url(MWRM_Repository::relative_path($source));
             }
-
-            MWRM_Log::delete_by_url(MWRM_Repository::relative_path(sanitize_text_field(wp_unslash($_POST['source']))));
         }
 
         wp_safe_redirect(add_query_arg($args, admin_url('admin.php')));

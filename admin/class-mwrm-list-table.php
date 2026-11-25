@@ -112,7 +112,8 @@ class MWRM_List_Table extends WP_List_Table
             'delete' => sprintf('<a href="%s">%s</a>', esc_url($delete), esc_html__('Delete', 'manny-wenas-redirect-manager')),
         );
 
-        return '<strong>' . esc_html($item->source) . '</strong>' . $this->row_actions($actions);
+        $label = !empty($item->is_regex) ? ' <small>' . esc_html__('Regex', 'manny-wenas-redirect-manager') . '</small>' : '';
+        return '<strong>' . esc_html($item->source) . '</strong>' . $label . $this->row_actions($actions);
     }
 
     /**
@@ -121,6 +122,9 @@ class MWRM_List_Table extends WP_List_Table
      */
     protected function column_status($item)
     {
+        if (!empty($item->is_regex)) {
+            return '&mdash;';
+        }
         $trace = MWRM_Repository::trace($item->source, $item->target);
 
         if (!empty($trace['inert'])) {

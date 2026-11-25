@@ -11,7 +11,7 @@ if (!defined('ABSPATH')) {
 
 class MWRM_Installer
 {
-    const DB_VERSION = '1.0.0';
+    const DB_VERSION = '1.0.1';
 
     const OK_TRANSIENT = 'mwrm_tables_ok';
     const LOCK_TRANSIENT = 'mwrm_repair_lock';
@@ -61,6 +61,7 @@ class MWRM_Installer
             target varchar(2083) NOT NULL,
             type smallint(3) NOT NULL DEFAULT 301,
             is_wildcard tinyint(1) NOT NULL DEFAULT 0,
+            is_regex tinyint(1) NOT NULL DEFAULT 0,
             hits bigint(20) unsigned NOT NULL DEFAULT 0,
             created_at datetime NOT NULL,
             PRIMARY KEY  (id),
