@@ -120,5 +120,9 @@ check(is_int($own), 'self-matching target can be stored but is guarded at runtim
 check(find_rule('/blog/loop/a') === null, 'self-matching regex target does not redirect');
 $missing = MWRM_Repository::save(array('source' => '^/missing/(.*)$', 'target' => '/new/$2', 'type' => 301, 'matching' => 'regex'));
 check(find_rule('/blog/missing/a') === null, 'missing capture does not make a broken URL');
+$optional = MWRM_Repository::save(array('source' => '^/miss/(a)?(b)$', 'target' => '/m/$1', 'type' => 301, 'matching' => 'regex'));
+check(is_int($optional), 'optional-capture rule stored');
+check(find_rule('/blog/miss/b') === null, 'unmatched optional capture does not redirect');
+check(find_rule('/blog/miss/ab')->resolved_target === '/m/a', 'matched optional capture is substituted');
 $invalid = MWRM_Repository::save(array('source' => '^/.*$', 'target' => '/new', 'type' => 301, 'matching' => 'regex'));
 check($invalid instanceof WP_Error && $invalid->get_error_code() === 'mwrm_regex', 'home-page-catching regex cannot be saved');

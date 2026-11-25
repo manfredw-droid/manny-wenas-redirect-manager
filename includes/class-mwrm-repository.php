@@ -289,7 +289,7 @@ class MWRM_Repository
         $request = null !== $original ? $original : $path;
         foreach ($rules as $rule) {
             $pattern = self::regex_pattern($rule->source);
-            if (null === $pattern || 1 !== @preg_match($pattern, $request, $matches)) {
+            if (null === $pattern || 1 !== @preg_match($pattern, $request, $matches, PREG_UNMATCHED_AS_NULL)) { // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged -- a PCRE limit hit returns false and the rule is skipped.
                 continue;
             }
 
@@ -301,7 +301,7 @@ class MWRM_Repository
             // Never redirect to the same URL or into the same regex rule again.
             if (self::is_internal($resolved)) {
                 $destination = self::relative_path($resolved, false);
-                if ($destination === $request || 1 === @preg_match($pattern, $destination)) {
+                if ($destination === $request || 1 === @preg_match($pattern, $destination)) { // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged -- a PCRE limit hit returns false; the rule still applies.
                     continue;
                 }
             }
@@ -329,7 +329,7 @@ class MWRM_Repository
         }
 
         $pattern = '#(*LIMIT_MATCH=100000)(*LIMIT_RECURSION=10000)' . $source . '#i';
-        return false === @preg_match($pattern, '') ? null : $pattern;
+        return false === @preg_match($pattern, '') ? null : $pattern; // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged -- an invalid user pattern must return false, not emit a warning.
     }
 
     /**
@@ -342,7 +342,7 @@ class MWRM_Repository
         if (null === $pattern) {
             return false;
         }
-        return 0 === @preg_match($pattern, '/');
+        return 0 === @preg_match($pattern, '/'); // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged -- see regex_pattern().
     }
 
     /**
