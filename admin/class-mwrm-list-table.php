@@ -62,19 +62,35 @@ class MWRM_List_Table extends WP_List_Table
 
         // phpcs:disable WordPress.Security.NonceVerification
         $allowed = array('source', 'hits');
-        $orderby = isset($_GET['orderby']) && in_array($_GET['orderby'], $allowed, true) ? $_GET['orderby'] : 'id';
-        $order = isset($_GET['order']) && 'asc' === $_GET['order'] ? 'ASC' : 'DESC';
+        $requested_orderby = isset($_GET['orderby']) ? sanitize_key(wp_unslash($_GET['orderby'])) : '';
+        $orderby = in_array($requested_orderby, $allowed, true) ? $requested_orderby : 'id';
+        $requested_order = isset($_GET['order']) ? sanitize_key(wp_unslash($_GET['order'])) : '';
+        $ascending = 'asc' === $requested_order;
         // phpcs:enable
 
         $paged = $this->get_pagenum();
         $table = MWRM_Repository::table();
 
-        $total = (int) $wpdb->get_var("SELECT COUNT(*) FROM {$table}");
-        $this->items = $wpdb->get_results($wpdb->prepare(
-            "SELECT * FROM {$table} ORDER BY {$orderby} {$order} LIMIT %d OFFSET %d",
-            self::PER_PAGE,
-            ($paged - 1) * self::PER_PAGE
-        ));
+        if (!MWRM_Installer::is_healthy('redirects')) {
+            $this->items = array();
+            $this->set_pagination_args(array('total_items' => 0, 'per_page' => self::PER_PAGE));
+
+            return;
+        }
+
+        $total = (int) $wpdb->get_var($wpdb->prepare('SELECT COUNT(*) FROM %i', $table));
+        $offset = ($paged - 1) * self::PER_PAGE;
+        if ($ascending) {
+            $this->items = $wpdb->get_results($wpdb->prepare(
+                'SELECT * FROM %i ORDER BY %i ASC LIMIT %d OFFSET %d',
+                $table, $orderby, self::PER_PAGE, $offset
+            ));
+        } else {
+            $this->items = $wpdb->get_results($wpdb->prepare(
+                'SELECT * FROM %i ORDER BY %i DESC LIMIT %d OFFSET %d',
+                $table, $orderby, self::PER_PAGE, $offset
+            ));
+        }
 
         $this->set_pagination_args(array('total_items' => $total, 'per_page' => self::PER_PAGE));
     }
@@ -96,7 +112,8 @@ class MWRM_List_Table extends WP_List_Table
             'delete' => sprintf('<a href="%s">%s</a>', esc_url($delete), esc_html__('Delete', 'manny-wenas-redirect-manager')),
         );
 
-        return '<strong>' . esc_html($item->source) . '</strong>' . $this->row_actions($actions);
+        $label = !empty($item->is_regex) ? ' <small>' . esc_html__('Regex', 'manny-wenas-redirect-manager') . '</small>' : '';
+        return '<strong>' . esc_html($item->source) . '</strong>' . $label . $this->row_actions($actions);
     }
 
     /**
@@ -105,10 +122,21 @@ class MWRM_List_Table extends WP_List_Table
      */
     protected function column_status($item)
     {
+        if (!empty($item->is_regex)) {
+            return '&mdash;';
+        }
         $trace = MWRM_Repository::trace($item->source, $item->target);
+
+        if (!empty($trace['inert'])) {
+            return '<span style="color:#b32d2e">' . esc_html__('Never applies: target is inside its own source', 'manny-wenas-redirect-manager') . '</span>';
+        }
 
         if ($trace['loop']) {
             return '<span style="color:#b32d2e">' . esc_html__('Redirect loop', 'manny-wenas-redirect-manager') . '</span>';
+        }
+
+        if (!empty($trace['limit'])) {
+            return '<span style="color:#b32d2e">' . esc_html__('Limit reached; possible loop', 'manny-wenas-redirect-manager') . '</span>';
         }
 
         if ($trace['hops'] > 0) {

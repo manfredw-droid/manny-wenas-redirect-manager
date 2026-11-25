@@ -68,8 +68,12 @@ class MWRM_Repository
     {
         global $wpdb;
 
+        if (!MWRM_Installer::is_healthy('redirects')) {
+            return null;
+        }
+
         return $wpdb->get_row(
-            $wpdb->prepare('SELECT * FROM ' . self::table() . ' WHERE id = %d', $id)
+            $wpdb->prepare('SELECT * FROM %i WHERE id = %d', self::table(), $id)
         );
     }
 
@@ -81,15 +85,19 @@ class MWRM_Repository
     {
         global $wpdb;
 
+        if (!MWRM_Installer::is_healthy('redirects')) {
+            return false;
+        }
+
         return (bool) $wpdb->get_var(
-            $wpdb->prepare('SELECT id FROM ' . self::table() . ' WHERE source = %s LIMIT 1', self::relative_path($source))
+            $wpdb->prepare('SELECT id FROM %i WHERE source = %s LIMIT 1', self::table(), self::relative_path($source))
         );
     }
 
     /**
      * Insert or update a redirect.
      *
-     * @param array $data {source, target, type}.
+     * @param array $data {source, target, type, matching (optional: regex)}.
      * @param int   $id   Existing ID, 0 to insert.
      * @return int|WP_Error Redirect ID.
      */
@@ -97,7 +105,12 @@ class MWRM_Repository
     {
         global $wpdb;
 
-        $source = self::relative_path($data['source']);
+        if (!MWRM_Installer::is_healthy('redirects')) {
+            return new WP_Error('mwrm_db', __('The redirect tables are not available.', 'manny-wenas-redirect-manager'));
+        }
+
+        $is_regex = isset($data['matching']) && 'regex' === $data['matching'];
+        $source = $is_regex ? trim((string) $data['source']) : self::relative_path($data['source']);
         $target = trim($data['target']);
         $type = (int) $data['type'];
 
@@ -108,17 +121,21 @@ class MWRM_Repository
 
         $target = esc_url_raw($target);
 
-        if ('/' === $source || '' === $target) {
+        if ('' === $source || ('/' === $source && !$is_regex) || '' === $target) {
             return new WP_Error('mwrm_invalid', __('Source and target are required.', 'manny-wenas-redirect-manager'));
         }
 
+        if ($is_regex && !self::valid_regex($source)) {
+            return new WP_Error('mwrm_regex', __('Use an anchored path pattern such as ^/old/([0-9]+)$; it must be valid and must not match the home page.', 'manny-wenas-redirect-manager'));
+        }
+
         // "/*" would redirect the whole site.
-        if ('/*' === $source) {
+        if (!$is_regex && '/*' === $source) {
             return new WP_Error('mwrm_root', __('A wildcard on the site root is not allowed.', 'manny-wenas-redirect-manager'));
         }
 
         $existing = $wpdb->get_var(
-            $wpdb->prepare('SELECT id FROM ' . self::table() . ' WHERE source = %s AND id <> %d LIMIT 1', $source, (int) $id)
+            $wpdb->prepare('SELECT id FROM %i WHERE source = %s AND id <> %d LIMIT 1', self::table(), $source, (int) $id)
         );
 
         if ($existing) {
@@ -129,15 +146,20 @@ class MWRM_Repository
             $type = 301;
         }
 
-        if ($source === self::normalize_path($target) && '/*' !== substr($source, -2)) {
+        if (!$is_regex && $source === self::normalize_path($target) && '/*' !== substr($source, -2)) {
             return new WP_Error('mwrm_loop', __('Source and target are the same.', 'manny-wenas-redirect-manager'));
+        }
+
+        if (!$is_regex && self::is_inert($source, $target)) {
+            return new WP_Error('mwrm_self', __('This wildcard would send every matching URL back into its own source path, so it would never apply.', 'manny-wenas-redirect-manager'));
         }
 
         $row = array(
             'source' => $source,
             'target' => $target,
             'type' => $type,
-            'is_wildcard' => '/*' === substr($source, -2) ? 1 : 0,
+            'is_wildcard' => !$is_regex && '/*' === substr($source, -2) ? 1 : 0,
+            'is_regex' => $is_regex ? 1 : 0,
         );
 
         if ($id) {
@@ -147,6 +169,7 @@ class MWRM_Repository
                 return new WP_Error('mwrm_db', __('Could not update the redirect.', 'manny-wenas-redirect-manager') . ' ' . $wpdb->last_error);
             }
 
+            delete_transient('mwrm_regex_rules');
             return (int) $id;
         }
 
@@ -157,6 +180,7 @@ class MWRM_Repository
             return new WP_Error('mwrm_db', __('Could not save the redirect.', 'manny-wenas-redirect-manager') . ' ' . $wpdb->last_error);
         }
 
+        delete_transient('mwrm_regex_rules');
         return (int) $wpdb->insert_id;
     }
 
@@ -168,7 +192,12 @@ class MWRM_Repository
     {
         global $wpdb;
 
+        if (!MWRM_Installer::is_healthy('redirects')) {
+            return;
+        }
+
         $wpdb->delete(self::table(), array('id' => (int) $id));
+        delete_transient('mwrm_regex_rules');
     }
 
     /**
@@ -180,10 +209,35 @@ class MWRM_Repository
      */
     public static function match($path, $original = null)
     {
+        if (!MWRM_Installer::is_healthy('redirects')) {
+            return null;
+        }
+
+        $error = '';
+        $rule = self::match_query($path, $original, $error);
+
+        // Missing table or column: confirmed, repaired once (throttled), retried once.
+        if (MWRM_Installer::check_error('redirects', $error)) {
+            $rule = self::match_query($path, $original, $error);
+        }
+
+        return $rule;
+    }
+
+    /**
+     * @param string      $path     Normalized path.
+     * @param string|null $original Path with original case.
+     * @param string      $error    Receives the error of the last query ('' when none).
+     * @return object|null
+     */
+    private static function match_query($path, $original, &$error)
+    {
         global $wpdb;
 
+        $error = '';
+
         $row = $wpdb->get_row(
-            $wpdb->prepare('SELECT * FROM ' . self::table() . ' WHERE is_wildcard = 0 AND source = %s LIMIT 1', $path)
+            $wpdb->prepare('SELECT * FROM %i WHERE is_wildcard = 0 AND is_regex = 0 AND source = %s LIMIT 1', self::table(), $path)
         );
 
         if ($row) {
@@ -192,14 +246,22 @@ class MWRM_Repository
             return $row;
         }
 
+        $error = (string) $wpdb->last_error;
+
+        if ('' !== $error) {
+            return null;
+        }
+
         $wildcards = $wpdb->get_results(
-            'SELECT * FROM ' . self::table() . ' WHERE is_wildcard = 1 ORDER BY CHAR_LENGTH(source) DESC'
+            $wpdb->prepare('SELECT * FROM %i WHERE is_wildcard = 1 AND is_regex = 0 ORDER BY CHAR_LENGTH(source) DESC', self::table())
         );
+
+        $error = (string) $wpdb->last_error;
 
         foreach ($wildcards as $rule) {
             $prefix = substr($rule->source, 0, -1); // "/old/".
 
-            if (0 === strpos($path . '/', $prefix)) {
+            if (0 === strpos($path . '/', $prefix) && !self::is_own_target($rule, $path)) {
                 $rest = substr(($original ? $original : $path) . '/', strlen($prefix));
                 $rule->resolved_target = str_replace('*', rtrim($rest, '/'), $rule->target);
 
@@ -207,7 +269,182 @@ class MWRM_Repository
             }
         }
 
+        if ('' !== $error) {
+            return null;
+        }
+
+        // Regex is deliberately last: existing exact and wildcard rules keep priority.
+        $rules = get_transient('mwrm_regex_rules');
+        if (false === $rules) {
+            $rules = $wpdb->get_results(
+                $wpdb->prepare('SELECT * FROM %i WHERE is_regex = 1 ORDER BY id ASC', self::table())
+            );
+            $error = (string) $wpdb->last_error;
+            if ('' !== $error) {
+                return null;
+            }
+            set_transient('mwrm_regex_rules', $rules, 5 * MINUTE_IN_SECONDS);
+        }
+
+        $request = null !== $original ? $original : $path;
+        foreach ($rules as $rule) {
+            $pattern = self::regex_pattern($rule->source);
+            if (null === $pattern || 1 !== @preg_match($pattern, $request, $matches, PREG_UNMATCHED_AS_NULL)) { // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged -- a PCRE limit hit returns false and the rule is skipped.
+                continue;
+            }
+
+            $resolved = self::regex_target($rule->target, $matches);
+            if (null === $resolved) {
+                continue;
+            }
+
+            // Never redirect to the same URL or into the same regex rule again.
+            if (self::is_internal($resolved)) {
+                $destination = self::relative_path($resolved, false);
+                if ($destination === $request || 1 === @preg_match($pattern, $destination)) { // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged -- a PCRE limit hit returns false; the rule still applies.
+                    continue;
+                }
+            }
+
+            $rule->resolved_target = $resolved;
+            return $rule;
+        }
+
         return null;
+    }
+
+    /**
+     * Regexes match the decoded path relative to the site's home URL, without
+     * a trailing slash. The source must be anchored so it cannot catch a whole
+     * site by accident. A per-match PCRE limit prevents costly expressions.
+     *
+     * @param string $source Pattern without delimiters.
+     * @return string|null PCRE pattern, or null when invalid.
+     */
+    private static function regex_pattern($source)
+    {
+        if (strlen($source) > 255 || 0 !== strpos($source, '^/') || '$' !== substr($source, -1)
+            || false !== strpos($source, '#') || preg_match('/[\x00\r\n]/', $source)) {
+            return null;
+        }
+
+        $pattern = '#(*LIMIT_MATCH=100000)(*LIMIT_RECURSION=10000)' . $source . '#i';
+        return false === @preg_match($pattern, '') ? null : $pattern; // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged -- an invalid user pattern must return false, not emit a warning.
+    }
+
+    /**
+     * @param string $source Pattern without delimiters.
+     * @return bool
+     */
+    public static function valid_regex($source)
+    {
+        $pattern = self::regex_pattern($source);
+        if (null === $pattern) {
+            return false;
+        }
+        return 0 === @preg_match($pattern, '/'); // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged -- see regex_pattern().
+    }
+
+    /**
+     * Replace $1, $2, etc. with captures without interpreting replacement code.
+     * An absent capture means this rule does not apply to this request.
+     *
+     * @param string $target  Destination template.
+     * @param array  $matches PCRE captures.
+     * @return string|null
+     */
+    private static function regex_target($target, array $matches)
+    {
+        $missing = false;
+        $resolved = preg_replace_callback('/\$(\d{1,2})/', function ($token) use ($matches, &$missing) {
+            $number = (int) $token[1];
+            if (!isset($matches[$number])) {
+                $missing = true;
+                return '';
+            }
+            return $matches[$number];
+        }, $target);
+        return $missing ? null : $resolved;
+    }
+
+    /**
+     * Is the path one this wildcard rule redirects to itself?
+     *
+     * When the target lies inside the rule's own source (for example /blog/* to
+     * /blog/archive/*), every redirected URL matches the rule again and grows without
+     * end. The rule is therefore not applied to the URLs it points to: it redirects
+     * once, and its own target area is left alone.
+     *
+     * @param object $rule Wildcard rule (source ends in "/*").
+     * @param string $path Normalized (lowercase) request path.
+     * @return bool
+     */
+    private static function is_own_target($rule, $path)
+    {
+        $target = (string) $rule->target;
+
+        if (!self::is_internal($target)) {
+            return false;
+        }
+
+        // Fixed target: only that URL itself.
+        if (false === strpos($target, '*')) {
+            return self::relative_path($target) === $path;
+        }
+
+        $area = self::target_area($target);
+        $is_folder = '/' === substr($area, -1);
+        $prefix = substr($rule->source, 0, -1); // "/blog/".
+
+        // Only a target inside the rule's own source can feed back into the rule.
+        if (0 !== strpos($is_folder ? $area : $area . '/', $prefix)) {
+            return false;
+        }
+
+        if ($is_folder) {
+            return 0 === strpos($path . '/', $area);
+        }
+
+        return 0 === strpos($path, $area) && '/' !== substr($path, strlen($area), 1);
+    }
+
+    /**
+     * Target path before the first "*", relative to the site root, keeping a trailing slash.
+     *
+     * @param string $target Wildcard target containing "*".
+     * @return string For example "/blog/archive/" or "/blog/new-".
+     */
+    private static function target_area($target)
+    {
+        $static = substr($target, 0, strpos($target, '*'));
+        $area = self::relative_path($static);
+
+        if ('/' !== $area && '/' === substr((string) wp_parse_url($static, PHP_URL_PATH), -1)) {
+            $area .= '/';
+        }
+
+        return $area;
+    }
+
+    /**
+     * Would this wildcard rule never apply, because every URL it matches is its own target?
+     *
+     * True when the target's folder is the source folder itself, for example /blog/* to
+     * /blog/* or /blog/* to /blog/*.html.
+     *
+     * @param string $source Normalized source.
+     * @param string $target Target.
+     * @return bool
+     */
+    public static function is_inert($source, $target)
+    {
+        $target = (string) $target;
+
+        if ('/*' !== substr($source, -2) || false === strpos($target, '*') || !self::is_internal($target)) {
+            return false;
+        }
+
+        return self::target_area($target) === substr($source, 0, -1);
     }
 
     /**
@@ -228,14 +465,23 @@ class MWRM_Repository
      *
      * @param string $source Source of the redirect being checked.
      * @param string $target Its target.
-     * @return array {hops:int, loop:bool, final:string} hops = further redirects after the first.
+     * @return array {hops:int, loop:bool, limit:bool, inert:bool, final:string}
+     *               hops  = further redirects after the first;
+     *               loop  = a URL repeats, so the redirect never ends (proven);
+     *               limit = still redirecting after the hop limit: possibly a loop, not proven;
+     *               inert = a wildcard rule that never applies (see is_inert()).
      */
     public static function trace($source, $target)
     {
+        if (self::is_inert(self::relative_path($source), $target)) {
+            return array('hops' => 0, 'loop' => false, 'limit' => false, 'inert' => true, 'final' => $target);
+        }
+
         $seen = array(self::relative_path($source));
         $current = $target;
         $hops = 0;
         $loop = false;
+        $limit = false;
 
         while ($hops < 10 && self::is_internal($current)) {
             $path = self::relative_path($current);
@@ -256,7 +502,12 @@ class MWRM_Repository
             $hops++;
         }
 
-        return array('hops' => $hops, 'loop' => $loop, 'final' => $current);
+        // Still redirecting at the limit without a repeated URL: possibly a loop, not proven.
+        if (!$loop && $hops >= 10 && self::is_internal($current) && self::match(self::relative_path($current))) {
+            $limit = true;
+        }
+
+        return array('hops' => $hops, 'loop' => $loop, 'limit' => $limit, 'inert' => false, 'final' => $current);
     }
 
     /**
@@ -269,6 +520,10 @@ class MWRM_Repository
     {
         global $wpdb;
 
+        if (!MWRM_Installer::is_healthy('redirects')) {
+            return array();
+        }
+
         $source = self::relative_path($source);
 
         if ('/*' === substr($source, -2)) {
@@ -276,7 +531,8 @@ class MWRM_Repository
         }
 
         $rows = $wpdb->get_results($wpdb->prepare(
-            'SELECT id, source, target FROM ' . self::table() . ' WHERE target LIKE %s',
+            'SELECT id, source, target FROM %i WHERE target LIKE %s',
+            self::table(),
             '%' . $wpdb->esc_like(basename($source)) . '%'
         ));
 
@@ -293,6 +549,14 @@ class MWRM_Repository
     {
         global $wpdb;
 
-        $wpdb->query($wpdb->prepare('UPDATE ' . self::table() . ' SET hits = hits + 1 WHERE id = %d', $id));
+        if (!MWRM_Installer::is_healthy('redirects')) {
+            return;
+        }
+
+        $wpdb->query($wpdb->prepare('UPDATE %i SET hits = hits + 1 WHERE id = %d', self::table(), $id));
+
+        if (MWRM_Installer::check_error('redirects', $wpdb->last_error)) {
+            $wpdb->query($wpdb->prepare('UPDATE %i SET hits = hits + 1 WHERE id = %d', self::table(), $id));
+        }
     }
 }

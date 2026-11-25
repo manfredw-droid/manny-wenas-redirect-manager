@@ -15,6 +15,7 @@ global $wpdb;
 $wpdb->query("DROP TABLE IF EXISTS {$wpdb->prefix}mwrm_redirects, {$wpdb->prefix}mwrm_404_log");
 
 delete_option('mwrm_db_version');
+delete_option('mwrm_install_error');
 
 // Per-user transients (slug prompts, import results).
 // phpcs:ignore WordPress.DB.DirectDatabaseQuery

@@ -1,15 +1,14 @@
 <?php
 /**
  * Plugin Name:       Manny Wenas Redirect Manager
- * Description:       301/302 redirect manager with wildcard redirects, redirect chain detection and a 404 monitor.
- * Version:           1.0.1
- * Requires at least: 5.8
- * Requires PHP:      7.4
+ * Description:       301/302 redirect manager with wildcard and regex redirects, redirect chain detection and a 404 monitor.
+ * Version:           1.0.4
+ * Requires at least: 6.2
+ * Requires PHP:      8.2
  * Author:            Manfred Wenas
  * License:           GPL v2 or later
  * License URI:       https://www.gnu.org/licenses/gpl-2.0.html
  * Text Domain:       manny-wenas-redirect-manager
- * Domain Path:       /languages
  *
  * @package MannyWenasRedirectManager
  */
@@ -18,7 +17,7 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
-define('MWRM_VERSION', '1.0.1');
+define('MWRM_VERSION', '1.0.4');
 define('MWRM_FILE', __FILE__);
 define('MWRM_PATH', plugin_dir_path(__FILE__));
 define('MWRM_URL', plugin_dir_url(__FILE__));
@@ -35,5 +34,6 @@ require_once MWRM_PATH . 'admin/class-mwrm-list-table.php';
 require_once MWRM_PATH . 'admin/class-mwrm-admin.php';
 
 register_activation_hook(__FILE__, array('MWRM_Installer', 'activate'));
+add_action('admin_notices', array('MWRM_Installer', 'render_error_notice'));
 
 add_action('plugins_loaded', array('MWRM_Plugin', 'init'));
