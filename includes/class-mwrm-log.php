@@ -38,9 +38,8 @@ class MWRM_Log
      */
     public static function maybe_log()
     {
-        global $wpdb;
-
-        if (!is_404() || is_admin() || !isset($_SERVER['REQUEST_URI']) || 'GET' !== (isset($_SERVER['REQUEST_METHOD']) ? $_SERVER['REQUEST_METHOD'] : '')) {
+        $request_method = isset($_SERVER['REQUEST_METHOD']) ? sanitize_text_field(wp_unslash($_SERVER['REQUEST_METHOD'])) : '';
+        if (!is_404() || is_admin() || !isset($_SERVER['REQUEST_URI']) || 'GET' !== $request_method) {
             return;
         }
 
@@ -53,18 +52,43 @@ class MWRM_Log
 
         $referrer = isset($_SERVER['HTTP_REFERER']) ? esc_url_raw(wp_unslash($_SERVER['HTTP_REFERER'])) : ''; // phpcs:ignore WordPress.Security.ValidatedSanitizedInput
 
-        $wpdb->query($wpdb->prepare(
-            'INSERT INTO ' . self::table() . ' (url, referrer, hits, last_seen) VALUES (%s, %s, 1, %s)
-            ON DUPLICATE KEY UPDATE hits = hits + 1, referrer = VALUES(referrer), last_seen = VALUES(last_seen)',
-            substr($path, 0, 255),
-            substr($referrer, 0, 2083),
-            current_time('mysql')
-        ));
+        if (!MWRM_Installer::is_healthy('404_log')) {
+            return;
+        }
+
+        $path = substr($path, 0, 255);
+        $referrer = substr($referrer, 0, 2083);
+
+        // Missing table or column: confirmed, repaired once (throttled), retried once.
+        if (MWRM_Installer::check_error('404_log', self::insert($path, $referrer))) {
+            self::insert($path, $referrer);
+        }
 
         // Bots can request endless unique URLs; keep the table bounded.
         if (1 === wp_rand(1, 50)) {
             self::prune();
         }
+    }
+
+    /**
+     * @param string $path     Path (max 255).
+     * @param string $referrer Referrer (max 2083).
+     * @return string Error of this query ('' when none).
+     */
+    private static function insert($path, $referrer)
+    {
+        global $wpdb;
+
+        $wpdb->query($wpdb->prepare(
+            'INSERT INTO %i (url, referrer, hits, last_seen) VALUES (%s, %s, 1, %s)
+            ON DUPLICATE KEY UPDATE hits = hits + 1, referrer = VALUES(referrer), last_seen = VALUES(last_seen)',
+            self::table(),
+            $path,
+            $referrer,
+            current_time('mysql')
+        ));
+
+        return (string) $wpdb->last_error;
     }
 
     /**
@@ -76,15 +100,22 @@ class MWRM_Log
     {
         global $wpdb;
 
+        if (!MWRM_Installer::is_healthy('404_log')) {
+            return;
+        }
+
         $table = self::table();
         $cutoff = $wpdb->get_var($wpdb->prepare(
-            "SELECT id FROM {$table} ORDER BY hits DESC, last_seen DESC LIMIT 1 OFFSET %d",
+            'SELECT id FROM %i ORDER BY hits DESC, last_seen DESC LIMIT 1 OFFSET %d',
+            $table,
             self::MAX_ROWS
         ));
 
         if ($cutoff) {
             $wpdb->query($wpdb->prepare(
-                "DELETE FROM {$table} WHERE id IN (SELECT id FROM (SELECT id FROM {$table} ORDER BY hits DESC, last_seen DESC LIMIT 18446744073709551615 OFFSET %d) AS old)",
+                'DELETE FROM %i WHERE id IN (SELECT id FROM (SELECT id FROM %i ORDER BY hits DESC, last_seen DESC LIMIT 18446744073709551615 OFFSET %d) AS old)',
+                $table,
+                $table,
                 self::MAX_ROWS
             ));
         }
@@ -97,8 +128,12 @@ class MWRM_Log
     {
         global $wpdb;
 
+        if (!MWRM_Installer::is_healthy('404_log')) {
+            return array();
+        }
+
         return $wpdb->get_results(
-            $wpdb->prepare('SELECT * FROM ' . self::table() . ' ORDER BY hits DESC, last_seen DESC LIMIT %d', self::LIMIT)
+            $wpdb->prepare('SELECT * FROM %i ORDER BY hits DESC, last_seen DESC LIMIT %d', self::table(), self::LIMIT)
         );
     }
 
@@ -109,6 +144,10 @@ class MWRM_Log
     public static function delete($id)
     {
         global $wpdb;
+
+        if (!MWRM_Installer::is_healthy('404_log')) {
+            return;
+        }
 
         $wpdb->delete(self::table(), array('id' => (int) $id));
     }
@@ -121,6 +160,10 @@ class MWRM_Log
     {
         global $wpdb;
 
+        if (!MWRM_Installer::is_healthy('404_log')) {
+            return;
+        }
+
         $wpdb->delete(self::table(), array('url' => $url));
     }
 
@@ -131,6 +174,10 @@ class MWRM_Log
     {
         global $wpdb;
 
-        $wpdb->query('TRUNCATE TABLE ' . self::table());
+        if (!MWRM_Installer::is_healthy('404_log')) {
+            return;
+        }
+
+        $wpdb->query($wpdb->prepare('TRUNCATE TABLE %i', self::table()));
     }
 }
